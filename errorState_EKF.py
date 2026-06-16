@@ -14,7 +14,7 @@ from rotations import angle_normalize, rpy_jacobian_axis_angle, skew_symmetric, 
 # This is where you will load the data from the pickle files. For parts 1 and 2, you will use
 # p1_data.pkl. For Part 3, you will use pt3_data.pkl.
 ################################################################################################
-with open('data/pt1_data.pkl', 'rb') as file:
+with open('data/pt3_data.pkl', 'rb') as file:
     data = pickle.load(file)
 
 ################################################################################################
@@ -78,11 +78,11 @@ C_li = np.array([
 ])
 
 # Incorrect calibration rotation matrix, corresponding to Euler RPY angles (0.05, 0.05, 0.05).
-# C_li = np.array([
-#      [ 0.9975 , -0.04742,  0.05235],
-#      [ 0.04992,  0.99763, -0.04742],
-#      [-0.04998,  0.04992,  0.9975 ]
-# ])
+#C_li = np.array([
+#     [ 0.9975 , -0.04742,  0.05235],
+#     [ 0.04992,  0.99763, -0.04742],
+#     [-0.04998,  0.04992,  0.9975 ]
+#])
 
 t_i_li = np.array([0.5, 0.1, 0.5])
 
@@ -100,6 +100,7 @@ var_imu_f = 0.10
 var_imu_w = 0.25
 var_gnss  = 0.1
 var_lidar = 0.1
+#var_lidar = 1e6  # Effectively ignores LIDAR measurements
 
 ################################################################################################
 # We can also set up some constants that won't change for any iteration of our solver.
@@ -251,7 +252,7 @@ for k in range(1, imu_f.data.shape[0]):  # start at 1 b/c we have initial predic
     
     # Check for GNSS measurement at this time
     while gnss_i < len(gnss.t) and gnss.t[gnss_i] <= imu_f.t[k]:
-        if gnss.t[gnss_i] == imu_f.t[k]:
+        if abs(gnss.t[gnss_i] - imu_f.t[k]) < 1e-2:
             # Apply GNSS measurement update
             p_est[k], v_est[k], q_est[k], p_cov[k] = \
                 measurement_update(var_gnss, p_cov[k], gnss.data[gnss_i], 
@@ -320,21 +321,47 @@ p_cov_euler_std = np.array(p_cov_euler_std)
 p_cov_std = np.sqrt(np.diagonal(p_cov[:, :6, :6], axis1=1, axis2=2))
 
 titles = ['Easting', 'Northing', 'Up', 'Roll', 'Pitch', 'Yaw']
+# Clip error values for plotting so extreme outliers do not distort the visualization
+pos_clip = 10.0  # meters
+angle_clip = 0.5  # radians
 for i in range(3):
-    ax[0, i].plot(range(num_gt), gt.p[:, i] - p_est[:num_gt, i])
-    ax[0, i].plot(range(num_gt),  3 * p_cov_std[:num_gt, i], 'r--')
-    ax[0, i].plot(range(num_gt), -3 * p_cov_std[:num_gt, i], 'r--')
+    position_error = np.clip(gt.p[:, i] - p_est[:num_gt, i], -pos_clip, pos_clip)
+    pos_bound = np.clip(3 * p_cov_std[:num_gt, i], -pos_clip, pos_clip)
+    ax[0, i].plot(range(num_gt), position_error)
+    ax[0, i].plot(range(num_gt),  pos_bound, 'r--')
+    ax[0, i].plot(range(num_gt), -pos_bound, 'r--')
     ax[0, i].set_title(titles[i])
 ax[0,0].set_ylabel('Meters')
 
 for i in range(3):
-    ax[1, i].plot(range(num_gt), \
-        angle_normalize(gt.r[:, i] - p_est_euler[:num_gt, i]))
-    ax[1, i].plot(range(num_gt),  3 * p_cov_euler_std[:num_gt, i], 'r--')
-    ax[1, i].plot(range(num_gt), -3 * p_cov_euler_std[:num_gt, i], 'r--')
+    angle_error = np.clip(angle_normalize(gt.r[:, i] - p_est_euler[:num_gt, i]), -angle_clip, angle_clip)
+    ang_bound = np.clip(3 * p_cov_euler_std[:num_gt, i], -angle_clip, angle_clip)
+    ax[1, i].plot(range(num_gt), angle_error)
+    ax[1, i].plot(range(num_gt),  ang_bound, 'r--')
+    ax[1, i].plot(range(num_gt), -ang_bound, 'r--')
     ax[1, i].set_title(titles[i+3])
 ax[1,0].set_ylabel('Radians')
 plt.show()
+
+
+plt.figure(figsize=(12,4))
+plt.title("Sensor Availability Timeline")
+
+# IMU timestamps (always present)
+plt.plot(imu_f.t, np.zeros_like(imu_f.t), 'k.', markersize=2, label='IMU')
+
+# GNSS timestamps
+plt.plot(gnss.t, np.ones_like(gnss.t), 'g.', markersize=4, label='GNSS')
+
+# LIDAR timestamps
+plt.plot(lidar.t, 2*np.ones_like(lidar.t), 'r.', markersize=4, label='LIDAR')
+
+plt.yticks([0,1,2], ['IMU','GNSS','LIDAR'])
+plt.xlabel("Time [ms]")
+plt.grid(True)
+plt.legend()
+plt.show()
+
 
 #### 7. Submission #############################################################################
 
@@ -345,22 +372,22 @@ plt.show()
 ################################################################################################
 
 # Pt. 1 submission
-##p1_indices = [9000, 9400, 9800, 10200, 10600]
-##p1_str = ''
-##for val in p1_indices:
-##    for i in range(3):
-##        p1_str += '%.3f ' % (p_est[val, i])
-##with open('pt1_submission.txt', 'w') as file:
-##    file.write(p1_str)
+#p1_indices = [9000, 9400, 9800, 10200, 10600]
+#p1_str = ''
+#for val in p1_indices:
+#    for i in range(3):
+#        p1_str += '%.3f ' % (p_est[val, i])
+#with open('pt1_submission.txt', 'w') as file:
+#    file.write(p1_str)
 
 # Pt. 2 submission
-# p2_indices = [9000, 9400, 9800, 10200, 10600]
-# p2_str = ''
-# for val in p2_indices:
-#     for i in range(3):
-#         p2_str += '%.3f ' % (p_est[val, i])
-# with open('pt2_submission.txt', 'w') as file:
-#     file.write(p2_str)
+##p2_indices = [9000, 9400, 9800, 10200, 10600]
+##p2_str = ''
+##for val in p2_indices:
+##    for i in range(3):
+##        p2_str += '%.3f ' % (p_est[val, i])
+##with open('pt2_submission.txt', 'w') as file:
+##    file.write(p2_str)
 
 # Pt. 3 submission
 p3_indices = [6800, 7600, 8400, 9200, 10000]
